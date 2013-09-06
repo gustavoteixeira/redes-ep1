@@ -1,0 +1,15 @@
+Utilizamos como referencia de implementação do protocolo HTTP
+o comportamento do servidor apache e o seguinte link:
+http://www.w3.org/Protocols/rfc2616/rfc2616-sec6.html
+
+O servidor ignora diversos erros nas requisições, exceto quando
+atrapalham na leitura da requisição.
+
+Extraimos os valores enviados em requisições POST, mas simplesmente
+jogamos elas para a STDOUT, pois não tem como utilizar tais valores
+em páginas HTML, sem o auxílio de algum script feito em PHP, Perl
+ou similar.
+
+ Nomes: Gustavo Teixeira da Cunha Coelho - nUSP 6797334
+        Henrique Gemignani Passos Lima   - nUSP 6879634
+
