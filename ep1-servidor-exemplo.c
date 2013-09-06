@@ -1,3 +1,14 @@
+/*
+ * EP1 - "Servidor" de HTTP.
+ * Nomes: Gustavo Teixeira da Cunha Coelho - nUSP 6797334
+ *        Henrique Gemignani Passos Lima   - nUSP 6879634
+ *
+ * AVISO: certamente não é seguro rodar como root.
+ * E talvez nem com o seu usuário mesmo, mas ok...
+ *
+ */
+
+
 /* Por Prof. Daniel Batista <batista@ime.usp.br>
  * Em 12/08/2013
  * 
@@ -56,6 +67,26 @@ void intHandler(int dummy) {
     exit(0);
 }
 
+const char* content_type_from(const char* filename) {
+    static const char* BINARY = "application/octet-stream";
+    static const char* HTML = "text/html";
+    static const char* PNG = "image/png";
+    static const char* JPEG = "image/jpeg";
+    static const char* PLAIN = "text/plain";
+
+    char* dot = strrchr(filename, '.');
+    if(!dot) return BINARY;
+    if(strcmp(dot + 1, "html") == 0)
+        return HTML;
+    if(strcmp(dot + 1, "png") == 0)
+        return PNG;
+    if(strcmp(dot + 1, "jpeg") == 0 || strcmp(dot + 1, "jpg") == 0)
+        return JPEG;
+    if(strcmp(dot + 1, "txt") == 0)
+        return PLAIN;
+    return BINARY;
+}
+
 void fill_header(char* out, const char* status) {
 	// Following http://www.w3.org/Protocols/rfc2616/rfc2616-sec6.html
 	char datebuffer[80];
@@ -104,28 +135,28 @@ void fourohfour(int connfd) {
     write(connfd, out, strlen(out));
 }
 
+int extract_path(char* filepath_buffer, const char* recvline) {
+    char* space = strchr(recvline, ' ');
+	if(!space) return 1; // bad request
+    
+	while(isspace(*(--space))); // encontra o primeiro não espaço
+
+    static const char* base_path = ".";
+
+	strcat(filepath_buffer, base_path);
+	strncat(filepath_buffer, recvline, (int)(space - recvline) + 1);
+    if(*space == '/')
+		strcat(filepath_buffer, "index.html");
+	return 0;
+}
+
 void get_request(int connfd, char* recvline) {
     if(recvline[0] != '/') BAD_REQUEST(connfd);
-    char* space = strchr(recvline, ' ');
     
-    if(space != NULL) { // Bad request... mas só ignorar.
-        space[0] = '\0';
-    }
-    
-    int recvline_len = strlen(recvline) - 1;
-    while(isspace(recvline[recvline_len]))
-        recvline[recvline_len--] = '\0';
-    
-    static const char* base_path = ".";
-    char filepath_buffer[MAXLINE + 1];
-    int offset = 0;
-       
-    offset += snprintf(filepath_buffer + offset, MAXLINE - offset, "%s", base_path);
-    offset += snprintf(filepath_buffer + offset, MAXLINE - offset, "%s", recvline);
-    if(filepath_buffer[offset-1] == '/')
-        offset += snprintf(filepath_buffer + offset, MAXLINE - offset, "%s", "index.html");
-    
-    printf("'%s'\n", filepath_buffer);
+	char filepath_buffer[MAXLINE + 1];
+	if(extract_path(filepath_buffer, recvline)) BAD_REQUEST(connfd);
+
+    printf("GET '%s'\n", filepath_buffer);
      
     sendFileToSocket(connfd, filepath_buffer);
 }
@@ -156,6 +187,7 @@ void post_request(int connfd, char* recvline) {
 		valor[0] = '\0';
 		valor++;
 
+		// Bem, só fornecemos páginas estáticas então os valores do POST são 100% inúteis. Pelo menos o STDOUT gosta deles.
 		printf("Peguei um argumento com nome '%s' e valor '%s'\n", nome, valor);
 
 		argumento = (next != NULL) ? (next + 1) : NULL;
@@ -165,8 +197,14 @@ void post_request(int connfd, char* recvline) {
 }
 
 void options_request(int connfd, char* recvline) {
+	char filepath_buffer[MAXLINE + 1];
+	if(extract_path(filepath_buffer, recvline)) BAD_REQUEST(connfd);
+
 	char out[5*MAXLINE];
 	fill_header(out, "200 OK");
+	strcat(out, "Content-Type: ");
+	strcat(out, content_type_from(filepath_buffer));
+	strcat(out, "\r\n");
 	strcat(out, "Allow: GET,POST,OPTIONS\r\n");
 	strcat(out, "\r\n");
     write(connfd, out, strlen(out));
@@ -174,8 +212,6 @@ void options_request(int connfd, char* recvline) {
 
 void handle_client(int connfd, char* recvline) {
     while(isspace(recvline[0])) ++recvline;
-    
-    puts(recvline);
     
     char* space = strchr(recvline, ' ');
     if(space == NULL) BAD_REQUEST(connfd);
@@ -326,26 +362,6 @@ int main (int argc, char **argv) {
 		close(connfd);
 	}
 	exit(0);
-}
-
-const char* content_type_from(const char* filename) {
-    static const char* BINARY = "application/octet-stream";
-    static const char* HTML = "text/html";
-    static const char* PNG = "image/png";
-    static const char* JPEG = "image/jpeg";
-    static const char* PLAIN = "text/plain";
-
-    char* dot = strrchr(filename, '.');
-    if(!dot) return BINARY;
-    if(strcmp(dot + 1, "html") == 0)
-        return HTML;
-    if(strcmp(dot + 1, "png") == 0)
-        return PNG;
-    if(strcmp(dot + 1, "jpeg") == 0 || strcmp(dot + 1, "jpg") == 0)
-        return JPEG;
-    if(strcmp(dot + 1, "txt") == 0)
-        return PLAIN;
-    return BINARY;
 }
 
 // Taken from StackOverflow
