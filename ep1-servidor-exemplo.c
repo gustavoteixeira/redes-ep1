@@ -45,6 +45,7 @@
 #define LISTENQ 1
 #define MAXDATASIZE 100
 #define MAXLINE 4096
+#define BAD_REQUEST(connfd) { bad_request(connfd); return; }
 
 static int listenfd;
 
@@ -55,13 +56,27 @@ void intHandler(int dummy) {
     exit(0);
 }
 
+void fill_header(char* out, const char* status) {
+	// Following http://www.w3.org/Protocols/rfc2616/rfc2616-sec6.html
+	char datebuffer[80];
+	time_t rawtime;
+
+	time(&rawtime);
+	struct tm* timeinfo = localtime(&rawtime);
+	strftime(datebuffer,80,"%Y-%m-%d-%H-%M-%S",timeinfo);
+
+	int line_end = sprintf(out, "HTTP/1.1 %s\r\n", status);
+	line_end += sprintf(out + line_end, "Date: %s\r\n", datebuffer);
+	line_end += sprintf(out + line_end, "Connection: close\r\n");
+	line_end += sprintf(out + line_end, "Server: Servidor Do Macaco v0.1-54-c84bs93-dirty\r\n");
+}
+
 void bad_request(int connfd) {
-    static const char* strg = "HTTP/1.1 400 Bad Request\n \
-Content-Length: 301\n \
-Connection: close\n \
-Content-Type: text/html; charset=UTF-8\n \
-\n\
-<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n\
+	char out[5*MAXLINE];
+	fill_header(out, "400 Bad Request");
+	strcat(out, "Content-Type: text/html; charset=UTF-8\r\n");
+	strcat(out, "\r\n");
+	strcat(out, "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n\
 <html><head>\n\
 <title>400 Bad Request</title>\n\
 </head><body>\n\
@@ -69,30 +84,28 @@ Content-Type: text/html; charset=UTF-8\n \
 <p>Your browser sent a request that this server could not understand.<br />\n\
 </p>\n\
 <hr>\n\
-<address>Apache/2.2.22 (Debian) Server at 127.0.1.1 Port 80</address>\n\
-</body></html>";
-    write(connfd, strg, strlen(strg));
+</body></html>");
+    write(connfd, out, strlen(out));
 }
 
-static const char* fourohfour = "HTTP/1.1 404 Not Found\n\
-Vary: Accept-Encoding\n\
-Content-Length: 285\n\
-Content-Type: text/html; charset=UTF-8\n\
-\n\
-<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n\
+void fourohfour(int connfd) {
+	char out[5*MAXLINE];
+	fill_header(out, "404 Not Found");
+	strcat(out, "Content-Type: text/html; charset=UTF-8\r\n");
+	strcat(out, "\r\n");
+	strcat(out, "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n\
 <html><head>\n\
 <title>404 Not Found</title>\n\
 </head><body>\n\
 <h1>Not Found</h1>\n\
 <p>The requested URL was not found on this server.</p>\n\
 <hr>\n\
-</body></html>";
+</body></html>");
+    write(connfd, out, strlen(out));
+}
 
 void get_request(int connfd, char* recvline) {
-    if(recvline[0] != '/') {
-        bad_request(connfd);
-        return;
-    }
+    if(recvline[0] != '/') BAD_REQUEST(connfd);
     char* space = strchr(recvline, ' ');
     
     if(space != NULL) { // Bad request... mas só ignorar.
@@ -118,12 +131,45 @@ void get_request(int connfd, char* recvline) {
 }
 
 void post_request(int connfd, char* recvline) {
+	char* empty_line = recvline;
+	do {
+		empty_line = strchr(empty_line + 1, '\n');
+		if(!empty_line) {
+			bad_request(connfd);
+			return;
+		}
+	} while(empty_line[1] != '\r');
+
+	// Achamos a linha 
+	char *argumentos = empty_line + 3; // escovando string
+	
+	for(char* troca_e_por_lines = argumentos; (troca_e_por_lines = strchr(troca_e_por_lines, '&')) != NULL; troca_e_por_lines[0] = '\n');
+
+	char* argumento = argumentos;
+	while(argumento != NULL) {
+		char* next = strchr(argumento, '\n');
+		if(next) next[0] = '\0';
+
+		char* nome = argumento;
+		char* valor = strchr(argumento, '=');
+		if(!valor) BAD_REQUEST(connfd);
+		valor[0] = '\0';
+		valor++;
+
+		printf("Peguei um argumento com nome '%s' e valor '%s'\n", nome, valor);
+
+		argumento = (next != NULL) ? (next + 1) : NULL;
+	}
+
     get_request(connfd, recvline);
-    // TODO
 }
 
 void options_request(int connfd, char* recvline) {
-    return
+	char out[5*MAXLINE];
+	fill_header(out, "200 OK");
+	strcat(out, "Allow: GET,POST,OPTIONS\r\n");
+	strcat(out, "\r\n");
+    write(connfd, out, strlen(out));
 }
 
 void handle_client(int connfd, char* recvline) {
@@ -132,10 +178,7 @@ void handle_client(int connfd, char* recvline) {
     puts(recvline);
     
     char* space = strchr(recvline, ' ');
-    if(space == NULL) {
-        bad_request(connfd);
-        return;
-    }
+    if(space == NULL) BAD_REQUEST(connfd);
     space[0] = '\0';
     if(strcmp("GET", recvline) == 0)
         get_request(connfd, space+1);
@@ -311,7 +354,7 @@ void sendFileToSocket(int sock, char* filename) {
     FILE *file = fopen(filename, "rb"); 
     if (!file)
     {   // can't open file
-        write(sock, fourohfour, strlen(fourohfour));
+        fourohfour(sock);
         return;
     }
     
